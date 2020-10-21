@@ -11,7 +11,7 @@
       
       HttpContext.GetUserInfoAsync()
       
-      In startup you can configure your namespaced UserInfo Extensions
+      In startup you can configure your namespaced UserInfo Extensions based upon the rules setup in Auth0
     </Description>
     <IsPackable>true</IsPackable>
     <license>LICENSE</license>
