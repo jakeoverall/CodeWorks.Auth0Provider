@@ -14,7 +14,7 @@
       In startup you can configure your namespaced UserInfo Extensions based upon the rules setup in Auth0
     </Description>
     <IsPackable>true</IsPackable>
-    <license>LICENSE</license>
+    <license>LICENSE.txt</license>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />
