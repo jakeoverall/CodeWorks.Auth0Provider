@@ -30,7 +30,7 @@ namespace CodeWorks.Auth0Provider
     {
       if (!ctx.Request.Headers.ContainsKey("Authorization"))
       {
-        throw new Exception("No Bearer Token Provided");
+        return default(T);
       }
       var bearer = ctx.Request.Headers["Authorization"].FirstOrDefault();
       T data;
