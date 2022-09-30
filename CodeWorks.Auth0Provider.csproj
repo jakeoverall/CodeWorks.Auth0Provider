@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>netcoreapp3.1</TargetFramework>
     <PackageId>CodeWorks.Auth0Provider</PackageId>
-    <Version>1.0.3</Version>
+    <Version>1.1.0</Version>
     <PackageTags>CodeWorks, Auth0, Identity, UserInfo</PackageTags>
     <Authors>Jake Overall, Mark Ohnsman</Authors>
     <Company>CodeWorks</Company>

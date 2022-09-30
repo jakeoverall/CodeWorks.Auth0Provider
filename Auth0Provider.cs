@@ -3,30 +3,33 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Collections.Generic;
 using System;
-using System.Diagnostics;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace CodeWorks.Auth0Provider
+namespace CodeWorks.Utils
 {
-   public static class Auth0ProviderExtension
+  public class Auth0Provider
   {
-    public static int TTL = 60 * 1000;
-    private static List<string> _KeyMap = new List<string>() { "id" };
-    private static MemoryCache _cache = new MemoryCache(new MemoryCacheOptions()
+    public int TTL { get; set; } = 60 * 1000;
+    public MemoryCacheOptions MemoryCacheOptions { get; set; } = new MemoryCacheOptions()
     {
-    });
-    public static void ConfigureKeyMap(List<string> keys)
+      ExpirationScanFrequency = TimeSpan.FromMinutes(5),
+    };
+
+    private List<string> _KeyMap = new List<string>() { "id" };
+    private readonly MemoryCache _cache;
+
+    public void ConfigureKeyMap(List<string> keys)
     {
       keys.ForEach(key =>
       {
         _KeyMap.Add(key);
       });
     }
-    public static async Task<T> GetUserInfoAsync<T>(this HttpContext ctx)
+
+    public async Task<T> GetUserInfoAsync<T>(HttpContext ctx)
     {
       if (!ctx.Request.Headers.ContainsKey("Authorization"))
       {
@@ -34,19 +37,19 @@ namespace CodeWorks.Auth0Provider
       }
       var bearer = ctx.Request.Headers["Authorization"].FirstOrDefault();
       T data;
+
       if (_cache.TryGetValue(bearer, out data))
       {
         return data;
       }
+
       var userInfo = await FetchFromAuth0(ctx, bearer);
       T entry = userInfo.ToObject<T>();
-      _cache.Set(bearer, entry, new MemoryCacheEntryOptions()
-      {
-        SlidingExpiration = TimeSpan.FromMilliseconds(TTL)
-      });
-      return entry;
+      _cache.Set(bearer, entry, GetMemoryCacheEntryOptions());
+
+      return userInfo.ToObject<T>();
     }
-    private static async Task<dynamic> FetchFromAuth0(HttpContext ctx, string bearer)
+    private async Task<dynamic> FetchFromAuth0(HttpContext ctx, string bearer)
     {
       var client = new HttpClient();
       var requestUrl = ctx.User.FindFirst(c => c.Value.EndsWith("userinfo")).Value;
@@ -71,5 +74,26 @@ namespace CodeWorks.Auth0Provider
       }
       return data;
     }
+
+    public virtual MemoryCacheEntryOptions GetMemoryCacheEntryOptions()
+    {
+      return new MemoryCacheEntryOptions()
+      {
+        SlidingExpiration = TimeSpan.FromSeconds(TTL),
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1)
+      };
+    }
+
+
+    public Auth0Provider()
+    {
+      _cache = new MemoryCache(MemoryCacheOptions);
+    }
+
+    public Auth0Provider(MemoryCacheOptions memoryCacheOptions)
+    {
+      _cache = new MemoryCache(memoryCacheOptions);
+    }
+
   }
 }
