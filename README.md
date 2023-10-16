@@ -4,51 +4,6 @@
 dotnet add package CodeWorks.Auth0Provider
 ```
 
-### Configure UserInfo (required)
-In Auth0 you can create properties directly onto your userInfo Token. This is best accomplished with auth rules. In your Auth0 Dashboard be sure to enable RBAC and add in this custom rule
-
-```javascript
-//AUTH0 RULE
-/**
- * Add common namespaced properties to userInfo
- */
-function extendUserInfo(user, context, callback) {
-    context.idToken = context.idToken || {};
-    context.authorization = context.authorization || {};
-    user.app_metadata = user.app_metadata || { };
-    user.app_metadata.new = user.app_metadata.id ? false : true;
-    user.app_metadata.id = user.app_metadata.id || generateId();
-
-    for (const key in user.app_metadata) {
-        context.idToken[key] = user.app_metadata[key];
-    }
-    context.idToken['roles'] = context.authorization.roles;
-    context.idToken['permissions'] = context.authorization.permissions;
-    context.idToken['user_metadata'] = user.user_metadata;
-    
-    if(!user.app_metadata.new){
-        return callback(null, user, context);
-    }
-    delete user.app_metadata.new;
-    auth0.users.updateAppMetadata(user.user_id, user.app_metadata)
-        .then(function () {
-            callback(null, user, context);
-        })
-        .catch(function (err) {
-            callback(err);
-        });
-        
-    function generateId() {
-      let timestamp = (new Date().getTime() / 1000 | 0).toString(16);
-      return timestamp + 'xxxxxxxxxxxxxxxx'.replace(/[x]/g, () => (
-        Math.random() * 16 | 0).toString(16)).toLowerCase();
-    }
-}
-```
-
-### ConfigureKeyMap 
-Properties that are added to Auth0 Tokens via rules can be retrieved with the following configuration. Namespaced properties are mapped to the top level class.  
-
 
 ***Startup.cs***
 ```c#
