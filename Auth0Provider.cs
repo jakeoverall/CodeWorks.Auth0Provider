@@ -4,7 +4,6 @@ using System.Net.Http.Headers;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Newtonsoft.Json.Linq;
-using System.Collections.Generic;
 using System;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -12,22 +11,13 @@ namespace CodeWorks.Utils
 {
   public class Auth0Provider
   {
-    public int TTL { get; set; } = 60 * 1000;
+    public int TTL { get; set; } = 60 * 60;
     public MemoryCacheOptions MemoryCacheOptions { get; set; } = new MemoryCacheOptions()
     {
-      ExpirationScanFrequency = TimeSpan.FromMinutes(5),
+      ExpirationScanFrequency = TimeSpan.FromMinutes(15),
     };
 
-    private List<string> _KeyMap = new List<string>() { "id" };
     private readonly MemoryCache _cache;
-
-    public void ConfigureKeyMap(List<string> keys)
-    {
-      keys.ForEach(key =>
-      {
-        _KeyMap.Add(key);
-      });
-    }
 
     public async Task<T> GetUserInfoAsync<T>(HttpContext ctx)
     {
@@ -54,25 +44,29 @@ namespace CodeWorks.Utils
       var client = new HttpClient();
       var requestUrl = ctx.User.FindFirst(c => c.Value.EndsWith("userinfo")).Value;
       var iss = ctx.User.FindFirst(c => c.Type == "iss").Value;
-      iss = iss.Replace('.', ':');
       client.DefaultRequestHeaders.Accept.Clear();
       client.DefaultRequestHeaders.Add("authorization", bearer);
       client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
       HttpResponseMessage response = await client.GetAsync(requestUrl);
+
       if (!response.IsSuccessStatusCode)
       {
-        throw new Exception("Unable to retrieve userInfo from Bearer Token");
+        throw new Exception(response.ReasonPhrase);
       }
+
+      // Handle the UserInfo Object
       var res = await response.Content.ReadAsStringAsync();
       dynamic data = JObject.Parse(res);
-      foreach (var key in _KeyMap)
+      dynamic userInfo = JObject.Parse(res);
+
+      foreach (JProperty key in data.Properties())
       {
-        if (data[iss + key] != null)
-        {
-          data[key] = data[iss + key];
+        if(key.Name.StartsWith("http")){
+          var prop = key.Name.Substring(key.Name.LastIndexOf('/')+1);
+          userInfo[prop] = data[key.Name];
         }
       }
-      return data;
+      return userInfo;
     }
 
     public virtual MemoryCacheEntryOptions GetMemoryCacheEntryOptions()
