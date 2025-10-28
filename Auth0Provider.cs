@@ -5,21 +5,25 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 
 namespace CodeWorks.Utils
 {
-  public class Auth0Provider(HttpClient httpClient, IMemoryCache cache)
+  public class Auth0Provider(HttpClient httpClient, IMemoryCache cache, IOptionsMonitor<JwtBearerOptions> jwtOptions)
   {
-    public TimeSpan MaxWaitForInFlightRequest { get; set; } = TimeSpan.FromSeconds(10);
-
-    private readonly IMemoryCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-    private readonly ConcurrentDictionary<string, Task<object>> _inFlightRequests = new();
     private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    private readonly IMemoryCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+    private readonly IOptionsMonitor<JwtBearerOptions> _jwtOptions = jwtOptions ?? throw new ArgumentNullException(nameof(jwtOptions));
+    private readonly ConcurrentDictionary<string, Task<object>> _inFlightRequests = new();
     private readonly string _cacheKeyPrefix = "Auth0Provider_UserInfo_";
+
+    public TimeSpan MaxWaitForInFlightRequest { get; set; } = TimeSpan.FromSeconds(10);
 
     public async Task<T> GetUserInfoAsync<T>(HttpContext ctx)
     {
@@ -34,24 +38,26 @@ namespace CodeWorks.Utils
       if (string.IsNullOrWhiteSpace(bearer))
         return default!;
 
-      var userId = ctx.User.FindFirst("id")?.Value ?? ctx.User.FindFirst("sub")?.Value
-                   ?? throw new Exception("User 'sub' claim not found");
+      var authority = _jwtOptions.Get(JwtBearerDefaults.AuthenticationScheme)
+                      ?.Authority?.TrimEnd('/')
+                      ?? throw new Exception("JWT Authority not configured");
 
-      // Check cache
-      if (_cache.TryGetValue($"{_cacheKeyPrefix}_{userId}", out CachedUser<T> cached) && cached.Expiration > DateTimeOffset.UtcNow)
+      var userId = GetUserId(ctx.User, authority);
+
+      // Cache lookup
+      if (_cache.TryGetValue($"{_cacheKeyPrefix}_{userId}", out CachedUser<T> cached)
+          && cached.Expiration > DateTimeOffset.UtcNow)
         return cached.Data;
 
       _cache.Remove($"{_cacheKeyPrefix}_{userId}");
 
-      // Handle in-flight requests
-      var task = _inFlightRequests.GetOrAdd(userId, _ => FetchAndCacheAsync<T>(ctx, bearer, userId));
+      var task = _inFlightRequests.GetOrAdd(userId, _ => FetchAndCacheAsync<T>(ctx, bearer, authority, userId));
 
       try
       {
         var completedTask = await Task.WhenAny(task, Task.Delay(MaxWaitForInFlightRequest));
         if (completedTask != task)
-          throw new TimeoutException(
-              $"Waiting for user info request for {userId} exceeded {MaxWaitForInFlightRequest.TotalSeconds} seconds.");
+          throw new TimeoutException($"Waiting for user info request for {userId} exceeded {MaxWaitForInFlightRequest.TotalSeconds} seconds.");
 
         return (T)await task;
       }
@@ -61,17 +67,16 @@ namespace CodeWorks.Utils
       }
     }
 
-    private async Task<object> FetchAndCacheAsync<T>(HttpContext ctx, string bearer, string userId)
+    private async Task<object> FetchAndCacheAsync<T>(HttpContext ctx, string bearer, string authority, string userId)
     {
-      var userInfoJson = await FetchNormalizedJsonString(ctx, bearer);
+      var userInfoJson = await FetchNormalizedJsonString(ctx, bearer, authority);
 
-      // Deserialize case-insensitive
       var entry = JsonSerializer.Deserialize<T>(
           userInfoJson,
-          new JsonSerializerOptions { PropertyNameCaseInsensitive = true, AllowTrailingCommas = true, }
+          new JsonSerializerOptions { PropertyNameCaseInsensitive = true, AllowTrailingCommas = true }
       ) ?? throw new Exception("Failed to deserialize user info.");
 
-      // Get token expiration from JWT "exp" claim
+      // Get token expiration
       var tokenHandler = new JwtSecurityTokenHandler();
       var jwt = tokenHandler.ReadJwtToken(bearer);
       var expClaim = jwt.Claims.FirstOrDefault(c => c.Type == "exp")?.Value;
@@ -80,7 +85,6 @@ namespace CodeWorks.Utils
 
       var tokenExp = DateTimeOffset.FromUnixTimeSeconds(expUnix);
 
-      // Cache until token expiration
       var cacheEntry = new CachedUser<T> { Data = entry, Expiration = tokenExp };
       _cache.Set($"{_cacheKeyPrefix}_{userId}", cacheEntry, new MemoryCacheEntryOptions
       {
@@ -90,10 +94,12 @@ namespace CodeWorks.Utils
       return entry!;
     }
 
-    private async Task<string> FetchNormalizedJsonString(HttpContext ctx, string bearer)
+    private async Task<string> FetchNormalizedJsonString(HttpContext ctx, string bearer, string authority)
     {
-      var requestUrl = ctx.User.FindFirst(c => c.Value.EndsWith("userinfo"))?.Value
-                       ?? throw new Exception("UserInfo endpoint not found in claims.");
+      // Try to get from claim, else default to standard /userinfo endpoint
+      var requestUrl =
+          ctx.User.FindFirst(c => c.Value.EndsWith("userinfo"))?.Value
+          ?? $"{authority}/userinfo";
 
       using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
       request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
@@ -105,18 +111,33 @@ namespace CodeWorks.Utils
 
       using var doc = JsonDocument.Parse(await response.Content.ReadAsStreamAsync());
 
-      // Normalize keys, overwrite duplicates
       var normalizedDict = new Dictionary<string, JsonElement>();
       foreach (var prop in doc.RootElement.EnumerateObject())
       {
-        var key = prop.Name.StartsWith("http")
-            ? prop.Name.Substring(prop.Name.LastIndexOf('/') + 1)
+        var key = prop.Name.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+            ? prop.Name[(prop.Name.LastIndexOf('/') + 1)..]
             : prop.Name;
 
         normalizedDict[key] = prop.Value.Clone();
       }
 
       return JsonSerializer.Serialize(normalizedDict);
+    }
+
+    private static string GetUserId(ClaimsPrincipal user, string authority)
+    {
+      string[] claimKeys =
+      {
+        "id",
+        $"{authority}/id",
+        "sub",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
+      };
+
+      return user.Claims
+        .FirstOrDefault(c => claimKeys.Contains(c.Type, StringComparer.OrdinalIgnoreCase))
+        ?.Value
+        ?? throw new Exception("User identifier claim not found.");
     }
 
     private class CachedUser<T>

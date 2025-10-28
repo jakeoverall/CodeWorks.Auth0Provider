@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <PackageId>CodeWorks.Auth0Provider</PackageId>
-    <Version>2.0.1</Version>
+    <Version>2.0.2</Version>
     <PackageTags>CodeWorks, Auth0, Identity, UserInfo</PackageTags>
     <Authors>Jake Overall, Mark Ohnsman</Authors>
     <Company>CodeWorks</Company>
@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.Http" Version="2.3.0" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.10" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.14.0" />

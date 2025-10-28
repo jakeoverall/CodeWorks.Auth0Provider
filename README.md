@@ -9,12 +9,7 @@ dotnet add package CodeWorks.Auth0Provider
 ```c#
 public void ConfigureServices(IServiceCollection services)
 {
-    services.AddMemoryCache();
-    services.AddHttpClient<Auth0Provider>(o => {
-      o.DefaultRequestHeaders.Accept.Add(
-        new MediaTypeWIthQUalityHeaderValue("application/json")
-      )
-    });
+    Services.AddAuth0Provider();
 }
 ```
 
